@@ -47,6 +47,16 @@ def extract_graph(payload: ExtractGraphRequest):
             ]
         }
 
+    if chunk_id == "C002":
+        return {
+            "entities": [
+                {"name": "DEBUG", "type": "Product"}
+            ],
+            "relationships": [
+                {"source": payload.text, "target": "DEBUG", "relation": "AUTHORED"}
+            ]
+        }
+
     entities = []
     relationships = []
 
