@@ -28,34 +28,37 @@ def root():
 
 
 def clean(s: str) -> str:
-    return s.strip().strip(".,;:!?\"'")
+    return s.strip().strip(".,;:!?\"'()[]{}")
 
 
 def split_sentences(text: str) -> List[str]:
     return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
 
 
-def infer_type(name: str) -> str:
-    lowered = name.lower()
+KNOWN_TYPES = {
+    "Andrej Karpathy": "Person",
+    "Harrison Chase": "Person",
+    "StabilityAI": "Organization",
+    "OpenAI": "Organization",
+    "Anthropic": "Organization",
+    "Duolingo": "Organization",
+    "Google": "Organization",
+    "Microsoft": "Organization",
+    "Meta": "Organization",
+    "GraphMind Systems": "Organization",
+    "LangChain": "Framework",
+    "LlamaIndex": "Framework",
+    "LangChainExpressionLanguage": "Framework",
+    "ChatGPT": "Product",
+    "Claude": "Product",
+}
 
-    exact = {
-        "andrej karpathy": "Person",
-        "harrison chase": "Person",
-        "stabilityai": "Organization",
-        "openai": "Organization",
-        "anthropic": "Organization",
-        "duolingo": "Organization",
-        "google": "Organization",
-        "microsoft": "Organization",
-        "meta": "Organization",
-        "langchain": "Framework",
-        "llamaindex": "Framework",
-        "langchainexpressionlanguage": "Framework",
-        "chatgpt": "Product",
-        "claude": "Product",
-    }
-    if lowered in exact:
-        return exact[lowered]
+
+def infer_type(name: str) -> str:
+    if name in KNOWN_TYPES:
+        return KNOWN_TYPES[name]
+
+    lowered = name.lower()
 
     if len(name.split()) >= 2:
         return "Person"
@@ -108,73 +111,55 @@ def extract_graph(payload: ExtractGraphRequest):
             ]
         }
 
-    if chunk_id == "C002":
-        return {
-            "entities": [
-                {"name": clean(payload.text), "type": "Product"}
-            ],
-            "relationships": [
-                {"source": "DEBUG_C002", "target": clean(payload.text), "relation": "AUTHORED"}
-            ]
-        }
-
     entities: List[Dict] = []
     relationships: List[Dict] = []
 
-    known_entities = [
-        "Andrej Karpathy",
-        "Harrison Chase",
-        "StabilityAI",
-        "OpenAI",
-        "Anthropic",
-        "Duolingo",
-        "Google",
-        "Microsoft",
-        "Meta",
-        "LangChain",
-        "LlamaIndex",
-        "LangChainExpressionLanguage",
-        "ChatGPT",
-        "Claude",
-    ]
-
-    for name in known_entities:
+    for name, typ in KNOWN_TYPES.items():
         if name.lower() in text.lower():
-            add_entity(entities, name)
+            add_entity(entities, name, typ)
 
     sentences = split_sentences(text)
+
     entity_pattern = r'([A-Z][A-Za-z0-9]*(?:[A-Z][A-Za-z0-9]*)*(?:\s+[A-Z][A-Za-z0-9]*(?:[A-Z][A-Za-z0-9]*)*)*)'
 
     relation_patterns = [
         (rf'{entity_pattern}\s+founded\s+{entity_pattern}', "FOUNDED", "forward"),
         (rf'{entity_pattern}\s+was founded by\s+{entity_pattern}', "FOUNDED", "reverse"),
+
         (rf'{entity_pattern}\s+developed\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+was developed by\s+{entity_pattern}', "DEVELOPED", "reverse"),
+
         (rf'{entity_pattern}\s+created\s+{entity_pattern}', "CREATED", "forward"),
         (rf'{entity_pattern}\s+was created by\s+{entity_pattern}', "CREATED", "reverse"),
+
         (rf'{entity_pattern}\s+hired\s+{entity_pattern}', "HIRED", "forward"),
         (rf'{entity_pattern}\s+was hired by\s+{entity_pattern}', "HIRED", "reverse"),
+
         (rf'{entity_pattern}\s+authored\s+{entity_pattern}', "AUTHORED", "forward"),
         (rf'{entity_pattern}\s+was authored by\s+{entity_pattern}', "AUTHORED", "reverse"),
+
         (rf'{entity_pattern}\s+is integrated into\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+integrates with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
+        (rf'{entity_pattern}\s+integrated with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
     ]
 
     for sentence in sentences:
         for pattern, relation, direction in relation_patterns:
             m = re.search(pattern, sentence)
-            if m:
-                left = clean(m.group(1))
-                right = clean(m.group(2))
+            if not m:
+                continue
 
-                if direction == "forward":
-                    source, target = left, right
-                else:
-                    source, target = right, left
+            left = clean(m.group(1))
+            right = clean(m.group(2))
 
-                add_entity(entities, source)
-                add_entity(entities, target)
-                add_rel(relationships, source, target, relation)
+            if direction == "forward":
+                source, target = left, right
+            else:
+                source, target = right, left
+
+            add_entity(entities, source)
+            add_entity(entities, target)
+            add_rel(relationships, source, target, relation)
 
     return {
         "entities": entities,
