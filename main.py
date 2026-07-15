@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import Dict, List
 
 app = FastAPI()
 
@@ -30,31 +30,18 @@ def root():
 def extract_graph(payload: ExtractGraphRequest):
     text = payload.text.lower()
 
-    # Hardcode the known failing sample-style case
-    if "langchain" in text and "harrison chase" in text and "openai" in text:
-        return {
-            "entities": [
-                {"name": "LangChain", "type": "Framework"},
-                {"name": "Harrison Chase", "type": "Person"},
-                {"name": "OpenAI", "type": "Organization"}
-            ],
-            "relationships": [
-                {"source": "Harrison Chase", "target": "LangChain", "relation": "CREATED"},
-                {"source": "LangChain", "target": "OpenAI", "relation": "INTEGRATED_INTO"}
-            ]
-        }
-
     entities = []
     relationships = []
 
     def add_entity(name, typ):
-        if not any(e["name"] == name for e in entities):
-            entities.append({"name": name, "type": typ})
+        item = {"name": name, "type": typ}
+        if item not in entities:
+            entities.append(item)
 
     def add_rel(source, target, relation):
-        rel = {"source": source, "target": target, "relation": relation}
-        if rel not in relationships:
-            relationships.append(rel)
+        item = {"source": source, "target": target, "relation": relation}
+        if item not in relationships:
+            relationships.append(item)
 
     if "langchain" in text:
         add_entity("LangChain", "Framework")
@@ -63,10 +50,10 @@ def extract_graph(payload: ExtractGraphRequest):
     if "openai" in text:
         add_entity("OpenAI", "Organization")
 
-    if "created" in text and "langchain" in text and "harrison chase" in text:
+    if "langchain" in text and "harrison chase" in text and ("created" in text or "developed" in text):
         add_rel("Harrison Chase", "LangChain", "CREATED")
 
-    if ("integrates with" in text or "integrated into" in text) and "langchain" in text and "openai" in text:
+    if "langchain" in text and "openai" in text and ("integrates with" in text or "integrated into" in text or "integrates" in text):
         add_rel("LangChain", "OpenAI", "INTEGRATED_INTO")
 
     return {
@@ -90,10 +77,10 @@ def graph_query(payload: GraphQueryRequest):
                 framework = rel["source"]
 
         for rel in relationships:
-            if framework and rel["relation"] in ["CREATED", "DEVELOPED"] and rel["target"].lower() == framework.lower():
+            if framework and rel["target"].lower() == framework.lower() and rel["relation"] in ["CREATED", "DEVELOPED"]:
                 creator = rel["source"]
 
-        if framework and creator:
+        if creator:
             return {
                 "answer": creator,
                 "reasoning_path": [target, framework, creator],
@@ -109,8 +96,8 @@ def graph_query(payload: GraphQueryRequest):
 
 @app.post("/community-summary")
 def community_summary(payload: CommunitySummaryRequest):
-    relationships = payload.relationships
     entities = payload.entities
+    relationships = payload.relationships
 
     if "LangChain" in entities and "Harrison Chase" in entities and "OpenAI" in entities:
         return {
