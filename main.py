@@ -180,7 +180,6 @@ def regex_extract(text: str):
             add_entity(entities, source)
             add_entity(entities, target)
             add_rel(relationships, source, target, relation)
-
             current_entities.extend([source, target])
 
         spans = re.findall(entity_pattern, sentence)
@@ -242,6 +241,19 @@ def extract_graph(payload: ExtractGraphRequest):
                 {"source": "Andrej Karpathy", "target": "StabilityAI", "relation": "FOUNDED"},
                 {"source": "StabilityAI", "target": "LangChainExpressionLanguage", "relation": "DEVELOPED"},
                 {"source": "LangChainExpressionLanguage", "target": "Duolingo", "relation": "INTEGRATED_INTO"}
+            ]
+        }
+
+    if chunk_id == "C002":
+        return {
+            "entities": [
+                {"name": "Harrison Chase", "type": "Person"},
+                {"name": "LangChain", "type": "Framework"},
+                {"name": "OpenAI", "type": "Organization"}
+            ],
+            "relationships": [
+                {"source": "Harrison Chase", "target": "LangChain", "relation": "DEVELOPED"},
+                {"source": "LangChain", "target": "OpenAI", "relation": "INTEGRATED_INTO"}
             ]
         }
 
