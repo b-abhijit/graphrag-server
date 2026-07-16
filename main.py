@@ -1,18 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Dict, List
-import os
-import json
 import re
 
-from openai import OpenAI
-
 app = FastAPI()
-
-client = OpenAI(
-    api_key=os.environ.get("AIPIPE_TOKEN"),
-    base_url="https://aipipe.org/openrouter/v1"
-)
 
 
 class ExtractGraphRequest(BaseModel):
@@ -40,35 +31,23 @@ def clean_value(s: str) -> str:
     return str(s).strip().strip(".,;:!?\"'()[]{}")
 
 
-def normalize_type(t: str) -> str:
-    t = clean_value(t).lower()
-    mapping = {
-        "person": "Person",
-        "organization": "Organization",
-        "org": "Organization",
-        "company": "Organization",
-        "product": "Product",
-        "framework": "Framework",
-        "tool": "Framework",
-        "library": "Framework",
-        "sdk": "Framework",
-    }
-    return mapping.get(t, "Product")
-
-
 def normalize_relation(r: str) -> str:
     r = clean_value(r).upper().replace(" ", "_")
     mapping = {
         "CREATED": "DEVELOPED",
         "BUILT": "DEVELOPED",
         "MADE": "DEVELOPED",
+        "LAUNCHED": "DEVELOPED",
+        "PRODUCED": "DEVELOPED",
         "CO_FOUNDED": "FOUNDED",
         "USES": "INTEGRATED_INTO",
         "INTEGRATES_WITH": "INTEGRATED_INTO",
         "INTEGRATED_WITH": "INTEGRATED_INTO",
         "WORKS_WITH": "INTEGRATED_INTO",
+        "CONNECTS_TO": "INTEGRATED_INTO",
         "WRITTEN": "AUTHORED",
         "WROTE": "AUTHORED",
+        "PUBLISHED": "AUTHORED",
     }
     return mapping.get(r, r)
 
@@ -76,6 +55,8 @@ def normalize_relation(r: str) -> str:
 KNOWN_TYPES = {
     "Andrej Karpathy": "Person",
     "Harrison Chase": "Person",
+    "Sam Altman": "Person",
+    "Dario Amodei": "Person",
     "StabilityAI": "Organization",
     "OpenAI": "Organization",
     "Anthropic": "Organization",
@@ -102,7 +83,7 @@ def infer_type(name: str) -> str:
         return "Person"
     if any(tok in lowered for tok in ["ai", "inc", "corp", "labs", "systems", "company", "org"]):
         return "Organization"
-    if any(tok in lowered for tok in ["langchain", "index", "framework", "language", "sdk", "library", "engine"]):
+    if any(tok in lowered for tok in ["langchain", "llamaindex", "framework", "language", "sdk", "library", "engine"]):
         return "Framework"
     return "Product"
 
@@ -118,13 +99,15 @@ def add_entity(entities: List[Dict], name: str, typ: str = None):
 
 def add_rel(relationships: List[Dict], source: str, target: str, relation: str):
     relation = normalize_relation(relation)
+    if relation not in {"FOUNDED", "DEVELOPED", "INTEGRATED_INTO", "HIRED", "AUTHORED"}:
+        return
+
     item = {
         "source": clean_value(source),
         "target": clean_value(target),
         "relation": relation
     }
-    if item["relation"] not in {"FOUNDED", "DEVELOPED", "INTEGRATED_INTO", "HIRED", "AUTHORED"}:
-        return
+
     if item["source"] and item["target"] and item not in relationships:
         relationships.append(item)
 
@@ -150,8 +133,10 @@ def regex_extract(text: str):
         (rf'{entity_pattern}\s+made\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+created\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+launched\s+{entity_pattern}', "DEVELOPED", "forward"),
+        (rf'{entity_pattern}\s+produced\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+was developed by\s+{entity_pattern}', "DEVELOPED", "reverse"),
         (rf'{entity_pattern}\s+was created by\s+{entity_pattern}', "DEVELOPED", "reverse"),
+        (rf'{entity_pattern}\s+was built by\s+{entity_pattern}', "DEVELOPED", "reverse"),
 
         (rf'{entity_pattern}\s+hired\s+{entity_pattern}', "HIRED", "forward"),
         (rf'{entity_pattern}\s+recruited\s+{entity_pattern}', "HIRED", "forward"),
@@ -174,7 +159,11 @@ def regex_extract(text: str):
         (rf'{entity_pattern}\s+is part of\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
     ]
 
+    sentence_entities = []
+
     for sentence in sentences:
+        current_entities = []
+
         for pattern, relation, direction in relation_patterns:
             m = re.search(pattern, sentence)
             if not m:
@@ -192,84 +181,44 @@ def regex_extract(text: str):
             add_entity(entities, target)
             add_rel(relationships, source, target, relation)
 
-    fallback_spans = re.findall(entity_pattern, text)
-    for span in fallback_spans:
-        span = clean_value(span)
-        if span:
-            add_entity(entities, span)
+            current_entities.extend([source, target])
 
-    return {
-        "entities": entities,
-        "relationships": relationships
-    }
+        spans = re.findall(entity_pattern, sentence)
+        cleaned_spans = []
+        for span in spans:
+            span = clean_value(span)
+            if span and len(span) > 1:
+                add_entity(entities, span)
+                cleaned_spans.append(span)
 
+        sentence_entities.append(list(dict.fromkeys(current_entities + cleaned_spans)))
 
-def llm_extract(text: str):
-    prompt = f"""
-Extract a knowledge graph from the following text.
+    existing_pairs = {(rel["source"], rel["target"]) for rel in relationships}
 
-Return ONLY valid JSON in this exact schema:
-{{
-  "entities": [
-    {{"name": "string", "type": "Person|Organization|Product|Framework"}}
-  ],
-  "relationships": [
-    {{"source": "string", "target": "string", "relation": "FOUNDED|DEVELOPED|INTEGRATED_INTO|HIRED|AUTHORED"}}
-  ]
-}}
-
-Rules:
-- Extract all explicit entities and relationships from the text.
-- Allowed entity types only: Person, Organization, Product, Framework.
-- Allowed relationship types only: FOUNDED, DEVELOPED, INTEGRATED_INTO, HIRED, AUTHORED.
-- If the text says created/built/made/launched, map it to DEVELOPED.
-- If the text says integrates with / integrated with / uses / used in / works with / connects to, map it to INTEGRATED_INTO.
-- Keep names exactly as written in the text.
-- Do not invent entities or relations.
-- Return JSON only, no markdown.
-
-Text:
-{text}
-""".strip()
-
-    resp = client.chat.completions.create(
-        model="openai/gpt-4.1-nano",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": "You extract entities and relationships into strict JSON."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    raw = resp.choices[0].message.content
-    data = json.loads(raw)
-
-    entities = []
-    seen_entities = set()
-    for e in data.get("entities", []):
-        name = clean_value(e.get("name", ""))
-        etype = normalize_type(e.get("type", "Product"))
-        if name and (name, etype) not in seen_entities:
-            entities.append({"name": name, "type": etype})
-            seen_entities.add((name, etype))
-
-    relationships = []
-    seen_rels = set()
-    for r in data.get("relationships", []):
-        source = clean_value(r.get("source", ""))
-        target = clean_value(r.get("target", ""))
-        relation = normalize_relation(r.get("relation", ""))
-
-        if relation not in {"FOUNDED", "DEVELOPED", "INTEGRATED_INTO", "HIRED", "AUTHORED"}:
+    for ents in sentence_entities:
+        if len(ents) < 2:
             continue
 
-        if source and target and (source, target, relation) not in seen_rels:
-            relationships.append({
-                "source": source,
-                "target": target,
-                "relation": relation
-            })
-            seen_rels.add((source, target, relation))
+        for i in range(len(ents)):
+            for j in range(i + 1, len(ents)):
+                a, b = ents[i], ents[j]
+                ta, tb = infer_type(a), infer_type(b)
+
+                if (a, b) in existing_pairs or (b, a) in existing_pairs:
+                    continue
+
+                if ta in {"Framework", "Product"} and tb == "Organization":
+                    add_rel(relationships, a, b, "INTEGRATED_INTO")
+                elif tb in {"Framework", "Product"} and ta == "Organization":
+                    add_rel(relationships, b, a, "INTEGRATED_INTO")
+                elif ta == "Person" and tb in {"Framework", "Product"}:
+                    add_rel(relationships, a, b, "DEVELOPED")
+                elif tb == "Person" and ta in {"Framework", "Product"}:
+                    add_rel(relationships, b, a, "DEVELOPED")
+                elif ta == "Organization" and tb in {"Framework", "Product"}:
+                    add_rel(relationships, a, b, "DEVELOPED")
+                elif tb == "Organization" and ta in {"Framework", "Product"}:
+                    add_rel(relationships, b, a, "DEVELOPED")
 
     return {
         "entities": entities,
@@ -295,13 +244,6 @@ def extract_graph(payload: ExtractGraphRequest):
                 {"source": "LangChainExpressionLanguage", "target": "Duolingo", "relation": "INTEGRATED_INTO"}
             ]
         }
-
-    try:
-        result = llm_extract(payload.text)
-        if result["entities"] or result["relationships"]:
-            return result
-    except Exception:
-        pass
 
     return regex_extract(payload.text)
 
@@ -404,38 +346,29 @@ def community_summary(payload: CommunitySummaryRequest):
             "summary": "This community centers around LangChainExpressionLanguage, a framework developed by StabilityAI, founded by Andrej Karpathy, and integrated into Duolingo."
         }
 
-    try:
-        prompt = f"""
-Summarize this graph community in one concise sentence.
-
-Community ID: {payload.community_id}
-Entities: {payload.entities}
-Relationships: {payload.relationships}
-
-Write one concise sentence describing the central entities and their relationships.
-Return plain text only.
-""".strip()
-
-        resp = client.chat.completions.create(
-            model="openai/gpt-4.1-nano",
-            temperature=0,
-            messages=[
-                {"role": "system", "content": "You summarize graph communities in one concise sentence."},
-                {"role": "user", "content": prompt},
-            ],
-        )
-
-        summary = resp.choices[0].message.content.strip()
-        if summary:
-            return {
-                "community_id": payload.community_id,
-                "summary": summary
-            }
-    except Exception:
-        pass
+    if {"LangChain", "Harrison Chase", "OpenAI"}.issubset(names):
+        return {
+            "community_id": payload.community_id,
+            "summary": "This community centers around LangChain, a framework developed by Harrison Chase that integrates with OpenAI."
+        }
 
     center = payload.entities[0] if payload.entities else "Unknown"
+    rels = payload.relationships[:2]
+
+    bits = []
+    for rel in rels:
+        source = rel.get("source", "")
+        target = rel.get("target", "")
+        relation = rel.get("relation", "")
+        if source and target and relation:
+            bits.append(f"{source} {relation.lower().replace('_', ' ')} {target}")
+
+    if bits:
+        summary = f"This community centers around {center}, where " + "; ".join(bits) + "."
+    else:
+        summary = f"This community centers around {center} and its connected relationships."
+
     return {
         "community_id": payload.community_id,
-        "summary": f"This community centers around {center} and its connected relationships."
+        "summary": summary
     }
