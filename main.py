@@ -66,7 +66,7 @@ def infer_type(name: str) -> str:
     if any(tok in lowered for tok in ["ai", "inc", "corp", "labs", "systems", "company", "org"]):
         return "Organization"
 
-    if any(tok in lowered for tok in ["langchain", "index", "framework", "language", "sdk", "library"]):
+    if any(tok in lowered for tok in ["langchain", "index", "framework", "language", "sdk", "library", "engine"]):
         return "Framework"
 
     return "Product"
@@ -131,25 +131,31 @@ def extract_graph(payload: ExtractGraphRequest):
         (rf'{entity_pattern}\s+developed\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+built\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+made\s+{entity_pattern}', "DEVELOPED", "forward"),
+        (rf'{entity_pattern}\s+produced\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+was developed by\s+{entity_pattern}', "DEVELOPED", "reverse"),
         (rf'{entity_pattern}\s+was built by\s+{entity_pattern}', "DEVELOPED", "reverse"),
         (rf'{entity_pattern}\s+was made by\s+{entity_pattern}', "DEVELOPED", "reverse"),
 
         (rf'{entity_pattern}\s+created\s+{entity_pattern}', "CREATED", "forward"),
+        (rf'{entity_pattern}\s+launched\s+{entity_pattern}', "CREATED", "forward"),
         (rf'{entity_pattern}\s+was created by\s+{entity_pattern}', "CREATED", "reverse"),
 
         (rf'{entity_pattern}\s+hired\s+{entity_pattern}', "HIRED", "forward"),
+        (rf'{entity_pattern}\s+recruited\s+{entity_pattern}', "HIRED", "forward"),
         (rf'{entity_pattern}\s+joined\s+{entity_pattern}', "HIRED", "reverse"),
         (rf'{entity_pattern}\s+was hired by\s+{entity_pattern}', "HIRED", "reverse"),
 
         (rf'{entity_pattern}\s+authored\s+{entity_pattern}', "AUTHORED", "forward"),
         (rf'{entity_pattern}\s+wrote\s+{entity_pattern}', "AUTHORED", "forward"),
+        (rf'{entity_pattern}\s+published\s+{entity_pattern}', "AUTHORED", "forward"),
         (rf'{entity_pattern}\s+was authored by\s+{entity_pattern}', "AUTHORED", "reverse"),
         (rf'{entity_pattern}\s+was written by\s+{entity_pattern}', "AUTHORED", "reverse"),
 
         (rf'{entity_pattern}\s+is integrated into\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+integrates with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+integrated with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
+        (rf'{entity_pattern}\s+works with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
+        (rf'{entity_pattern}\s+connects to\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+uses\s+{entity_pattern}', "INTEGRATED_INTO", "reverse"),
         (rf'{entity_pattern}\s+is used in\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+is part of\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
@@ -172,6 +178,13 @@ def extract_graph(payload: ExtractGraphRequest):
             add_entity(entities, source)
             add_entity(entities, target)
             add_rel(relationships, source, target, relation)
+
+    # Fallback: add capitalized/camel-case spans as entities
+    fallback_spans = re.findall(entity_pattern, text)
+    for span in fallback_spans:
+        span = clean(span)
+        if span and len(span) > 1:
+            add_entity(entities, span)
 
     return {
         "entities": entities,
