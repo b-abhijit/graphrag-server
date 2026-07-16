@@ -66,7 +66,7 @@ def infer_type(name: str) -> str:
     if any(tok in lowered for tok in ["ai", "inc", "corp", "labs", "systems", "company", "org"]):
         return "Organization"
 
-    if any(tok in lowered for tok in ["langchain", "index", "framework", "language"]):
+    if any(tok in lowered for tok in ["langchain", "index", "framework", "language", "sdk", "library"]):
         return "Framework"
 
     return "Product"
@@ -124,23 +124,35 @@ def extract_graph(payload: ExtractGraphRequest):
 
     relation_patterns = [
         (rf'{entity_pattern}\s+founded\s+{entity_pattern}', "FOUNDED", "forward"),
+        (rf'{entity_pattern}\s+co-founded\s+{entity_pattern}', "FOUNDED", "forward"),
         (rf'{entity_pattern}\s+was founded by\s+{entity_pattern}', "FOUNDED", "reverse"),
+        (rf'{entity_pattern}\s+was co-founded by\s+{entity_pattern}', "FOUNDED", "reverse"),
 
         (rf'{entity_pattern}\s+developed\s+{entity_pattern}', "DEVELOPED", "forward"),
+        (rf'{entity_pattern}\s+built\s+{entity_pattern}', "DEVELOPED", "forward"),
+        (rf'{entity_pattern}\s+made\s+{entity_pattern}', "DEVELOPED", "forward"),
         (rf'{entity_pattern}\s+was developed by\s+{entity_pattern}', "DEVELOPED", "reverse"),
+        (rf'{entity_pattern}\s+was built by\s+{entity_pattern}', "DEVELOPED", "reverse"),
+        (rf'{entity_pattern}\s+was made by\s+{entity_pattern}', "DEVELOPED", "reverse"),
 
         (rf'{entity_pattern}\s+created\s+{entity_pattern}', "CREATED", "forward"),
         (rf'{entity_pattern}\s+was created by\s+{entity_pattern}', "CREATED", "reverse"),
 
         (rf'{entity_pattern}\s+hired\s+{entity_pattern}', "HIRED", "forward"),
+        (rf'{entity_pattern}\s+joined\s+{entity_pattern}', "HIRED", "reverse"),
         (rf'{entity_pattern}\s+was hired by\s+{entity_pattern}', "HIRED", "reverse"),
 
         (rf'{entity_pattern}\s+authored\s+{entity_pattern}', "AUTHORED", "forward"),
+        (rf'{entity_pattern}\s+wrote\s+{entity_pattern}', "AUTHORED", "forward"),
         (rf'{entity_pattern}\s+was authored by\s+{entity_pattern}', "AUTHORED", "reverse"),
+        (rf'{entity_pattern}\s+was written by\s+{entity_pattern}', "AUTHORED", "reverse"),
 
         (rf'{entity_pattern}\s+is integrated into\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+integrates with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
         (rf'{entity_pattern}\s+integrated with\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
+        (rf'{entity_pattern}\s+uses\s+{entity_pattern}', "INTEGRATED_INTO", "reverse"),
+        (rf'{entity_pattern}\s+is used in\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
+        (rf'{entity_pattern}\s+is part of\s+{entity_pattern}', "INTEGRATED_INTO", "forward"),
     ]
 
     for sentence in sentences:
